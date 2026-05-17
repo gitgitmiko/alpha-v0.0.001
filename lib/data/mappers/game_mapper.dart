@@ -45,7 +45,18 @@ abstract final class GameMapper {
     imageUri ??= images.isNotEmpty ? images.first['Uri'] as String? : null;
 
     final priceData = _extractPrice(product, region.market);
-    if (priceData == null) return null;
+    if (priceData == null) {
+      return GameEntity(
+        productId: productId,
+        title: title,
+        imageUrl: PriceUtils.imageUrl(imageUri),
+        originalPrice: 0,
+        discountedPrice: 0,
+        currency: region.currencyCode,
+        discountPercent: 0,
+        region: region.market,
+      );
+    }
 
     final original = priceData.msrp > priceData.listPrice
         ? priceData.msrp
@@ -63,6 +74,23 @@ abstract final class GameMapper {
       currency: priceData.currency,
       discountPercent: discount,
       region: region.market,
+    );
+  }
+
+  /// Merge catalog pricing into an existing game (keeps autosuggest title/image).
+  static GameEntity mergePrice(GameEntity base, GameEntity? priced) {
+    if (priced == null || priced.discountedPrice <= 0 && priced.originalPrice <= 0) {
+      return base;
+    }
+    return GameEntity(
+      productId: base.productId,
+      title: base.title.isNotEmpty ? base.title : priced.title,
+      imageUrl: base.imageUrl.isNotEmpty ? base.imageUrl : priced.imageUrl,
+      originalPrice: priced.originalPrice,
+      discountedPrice: priced.discountedPrice,
+      currency: priced.currency,
+      discountPercent: priced.discountPercent,
+      region: base.region,
     );
   }
 
@@ -87,7 +115,8 @@ abstract final class GameMapper {
     final skuAvail =
         (product['DisplaySkuAvailabilities'] as List<dynamic>?) ?? [];
 
-    _PriceData? best;
+    _PriceData? bestPurchase;
+    _PriceData? bestAny;
 
     for (final skuEntry in skuAvail) {
       final availabilities =
@@ -112,18 +141,25 @@ abstract final class GameMapper {
           currency: currency,
         );
 
-        // Prefer purchasable Xbox offers, then any priced offer
         final actions = (avMap['Actions'] as List<dynamic>?) ?? [];
         final platforms = _allowedPlatforms(avMap);
         final isXboxPurchase = actions.contains('Purchase') &&
             platforms.any((p) => p.contains('Xbox'));
-        if (isXboxPurchase) return candidate;
 
-        best ??= candidate;
+        if (isXboxPurchase) {
+          if (bestPurchase == null ||
+              listPrice < bestPurchase.listPrice) {
+            bestPurchase = candidate;
+          }
+        } else if (listPrice > 0) {
+          if (bestAny == null || listPrice < bestAny.listPrice) {
+            bestAny = candidate;
+          }
+        }
       }
     }
 
-    return best;
+    return bestPurchase ?? bestAny;
   }
 
   static bool _availabilityForMarket(Map<String, dynamic> av, String market) {

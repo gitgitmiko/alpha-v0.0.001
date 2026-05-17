@@ -168,23 +168,68 @@ class MicrosoftStoreApi {
     if (slice.isEmpty) return [];
 
     final ids = slice.map((h) => h.productId).toList();
+    var games = await _mapHintsToGames(slice, region, ids);
+
+    final missingPrice =
+        games.where((g) => g.discountedPrice <= 0).map((g) => g.productId).toList();
+    if (missingPrice.isNotEmpty) {
+      games = await _retryMissingPrices(games, region, missingPrice);
+    }
+
+    return games;
+  }
+
+  Future<List<GameEntity>> _mapHintsToGames(
+    List<AutosuggestHint> hints,
+    RegionEntity region,
+    List<String> ids,
+  ) async {
     final products = await fetchProducts(region: region, productIds: ids);
     final fromCatalog = GameMapper.fromProductList(products, region);
     final byId = {for (final g in fromCatalog) g.productId: g};
 
-    return slice.map((hint) {
-      return byId[hint.productId] ??
-          GameEntity(
-            productId: hint.productId,
-            title: hint.title,
-            imageUrl: _normalizeImage(hint.imageUrl),
-            originalPrice: 0,
-            discountedPrice: 0,
-            currency: region.currencyCode,
-            discountPercent: 0,
-            region: region.market,
-          );
+    return hints.map((hint) {
+      final base = GameEntity(
+        productId: hint.productId,
+        title: hint.title,
+        imageUrl: _normalizeImage(hint.imageUrl),
+        originalPrice: 0,
+        discountedPrice: 0,
+        currency: region.currencyCode,
+        discountPercent: 0,
+        region: region.market,
+      );
+      return GameMapper.mergePrice(base, byId[hint.productId]);
     }).toList();
+  }
+
+  /// Second pass: fetch pricing per product (batch misses some titles).
+  Future<List<GameEntity>> _retryMissingPrices(
+    List<GameEntity> games,
+    RegionEntity region,
+    List<String> productIds,
+  ) async {
+    final byId = {for (final g in games) g.productId: g};
+    const chunkSize = 5;
+
+    for (var i = 0; i < productIds.length; i += chunkSize) {
+      final chunk = productIds.skip(i).take(chunkSize).toList();
+      await Future.wait(
+        chunk.map((id) async {
+          try {
+            final data = await fetchProducts(region: region, productIds: [id]);
+            final priced = GameMapper.fromProductList(data, region);
+            if (priced.isEmpty) return;
+            final current = byId[id];
+            if (current != null) {
+              byId[id] = GameMapper.mergePrice(current, priced.first);
+            }
+          } catch (_) {}
+        }),
+      );
+    }
+
+    return games.map((g) => byId[g.productId] ?? g).toList();
   }
 
   Future<List<AutosuggestHint>> fetchAutosuggestHints({
