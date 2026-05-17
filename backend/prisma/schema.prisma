@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Game {
+  id           String   @id @default(uuid())
+  productId    String
+  title        String
+  imageUrl     String?
+  market       String
+  originalPrice Float
+  discountPrice Float
+  currency     String
+  discountPercent Float @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([productId, market])
+  @@index([market])
+}
+
+model PriceHistory {
+  id         String   @id @default(uuid())
+  productId  String
+  market     String
+  price      Float
+  discount   Float
+  recordedAt DateTime @default(now())
+
+  @@index([productId, market])
+}
+
+model Wishlist {
+  id            String   @id @default(uuid())
+  userId        String?
+  productId     String
+  title         String
+  image         String?
+  region        String
+  price         Float
+  discountPrice Float
+  createdAt     DateTime @default(now())
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String?
+  productId String
+  title     String
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  productId String
+  title     String
+  message   String
+  sentAt    DateTime @default(now())
+}
